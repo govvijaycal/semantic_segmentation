@@ -26,7 +26,7 @@ class UNetModel():
         This is defaulting to settings in CARLA, which has 13 semantic segmentation classes.
         https://carla.readthedocs.io/en/stable/cameras_and_sensors/#camera-semantic-segmentation
     '''
-    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=1e-3, decay=1e-4):
+    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=1e-2, decay=5e-4):
         """ Constructor with adjustable base pretrained CNN model and segmentation target size.
 
         Args:
@@ -121,22 +121,14 @@ class UNetModel():
             # y_true: batch x height x width x channels (one-hot encoding of binary label)
             # y_pred: batch x height x width x channels (e.g. softmax output)
             y_true_mask = tf.cast(y_true, tf.float32)
-            y_pred_mask = tf.one_hot(tf.argmax(y_pred, axis=-1),
-                                     y_pred.shape[-1],
-                                     dtype=tf.float32)
+            y_pred_mask = tf.one_hot(tf.argmax(y_pred, axis=-1), y_pred.shape[-1], dtype=tf.float32)
 
-            sum_axes = tuple(range(1,
-                                   len(y_pred.shape) -
-                                   1))  # height, width axes
+            sum_axes = tuple(range(1, len(y_pred.shape)-1))  # height, width axes
 
-            intersection = tf.reduce_sum(y_true_mask * y_pred_mask,
-                                         sum_axes)  # batch x channel
-            union = tf.reduce_sum(
-                tf.clip_by_value(y_true_mask + y_pred_mask, 0, 1),
-                sum_axes)  # batch x channel
-            return tf.reduce_mean(
-                (intersection) /
-                (union + epsilon))  # mean over batch and channels
+            # Both intersection and union tensors have shape batch x channels.
+            intersection = tf.reduce_sum(y_true_mask * y_pred_mask, sum_axes)
+            union = tf.reduce_sum(tf.clip_by_value(y_true_mask + y_pred_mask, 0, 1), sum_axes)
+            return tf.reduce_mean((intersection) / (union + epsilon)) # mean over batch and channels
 
         return metric
 
@@ -196,16 +188,14 @@ class UNetModel():
                                               reshuffle_each_iteration=True)
         train_dataset = train_dataset.map(parse_function)
         train_dataset = train_dataset.batch(batch_size)
-        train_dataset = train_dataset.map(tf_augment_function,
-                                          num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        train_dataset = train_dataset.map(tf_augment_function)
+        train_dataset = train_dataset.prefetch(buffer_size=2*batch_size)
 
         val_dataset = tf.data.Dataset.from_tensor_slices(val_img_list)
         val_dataset = val_dataset.map(parse_function)
         val_dataset = val_dataset.batch(batch_size)
-        val_dataset = val_dataset.map(tf_val_augment_function,
-                                      num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        val_dataset = val_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        val_dataset = val_dataset.map(tf_val_augment_function)
+        val_dataset = val_dataset.prefetch(buffer_size=2*batch_size)
 
         init_lr = K.get_value(self._model.optimizer.lr)
 
@@ -235,7 +225,7 @@ class UNetModel():
                 # compute validation loss, miou
                 val_losses = []
                 val_mious = []
-                for images, labels in train_dataset:
+                for images, labels in val_dataset:
                     images = tf.cast(images, tf.float32) / 127.5 - 1.0
                     loss, miou = self._model.test_on_batch(images, labels)
                     val_losses.append(loss)
@@ -336,10 +326,8 @@ if __name__ == '__main__':
     '''
 
     # (2) Prediction test
-    model = UNetModel(backbone='ResNet50', num_classes=13)
-    parse_fun = partial(dl.parse_image,
-                        num_seg_classes=13,
-                        crop_bbox=[0, 0, 450, 800])
+    model = UNetModel(backbone='MobileNetV2', num_classes=13)
+    parse_fun = partial(dl.parse_image, num_seg_classes=13, crop_bbox=[0, 0, 450, 800])
 
     TRAINDIR = './train/images/'
     train_imgs = glob.glob(TRAINDIR + '*.png')
@@ -351,9 +339,11 @@ if __name__ == '__main__':
                     parse_function=parse_fun,
                     tf_augment_function=dl.tf_augment_function,
                     tf_val_augment_function=dl.tf_val_augment_function,
-                    logdir='./log/carla_resnet50_test2/',
-                    num_epochs=20,
-                    batch_size=8,
+                    logdir='./log/carla_mobilenetv2_test/',
+                    num_epochs=3000,
+                    batch_size=16,
                     log_epoch_freq=10,
-                    save_epoch_freq=50)
-    model.predict_folder('./val/images/', './val/preds/')
+                    save_epoch_freq=500)
+
+    #model.load_weights('')
+    #model.predict_folder('./val/images/', './val/preds/')

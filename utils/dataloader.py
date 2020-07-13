@@ -7,7 +7,7 @@ from functools import partial
 import numpy as np
 import tensorflow as tf
 import imgaug.augmenters as iaa
-
+import pdb
 
 def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
     """ Takes an image directory and returns dictionary of images and labels.
@@ -36,7 +36,7 @@ def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
     if crop_bbox is not None:
         image = tf.image.crop_to_bounding_box(image, crop_bbox[0], crop_bbox[1],
                                               crop_bbox[2], crop_bbox[3])
-
+    
     mask_path = tf.strings.regex_replace(img_path, "images", "labels") # assumed directory structure
     mask = tf.io.read_file(mask_path)
     mask = tf.image.decode_png(mask, channels=1)
@@ -48,7 +48,6 @@ def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
     mask = tf.one_hot(tf.squeeze(mask), num_seg_classes, dtype=tf.uint8) # H x W -> H x W x channels
 
     return {'image': image, 'label': mask, 'name': name}
-
 
 def augment_function(image, label):
     """ Takes in an image, segmentation label pair and returns augmented variants for training.
@@ -96,6 +95,59 @@ def val_augment_function(image, label):
     image_val, label_val = seq(images=image, segmentation_maps=label) # image_val is a list
     return np.array(image_val), np.array(label_val)
 
+# def tf_train_function(instance_dict):
+#     image_train = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
+#     label_train = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
+
+#     sample_rvs = tf.random.uniform(shape=[4])
+
+#     # random 224 x 224 crop or full image resize
+#     if sample_rvs[0] > 0.5:    
+#         offset_rvs = tf.random.uniform(shape=[2])    
+#         offset_height = tf.cast(offset_rvs[0] * 226.0, dtype=tf.int32) # original height = 450
+#         offset_width  = tf.cast(offset_rvs[1] * 576.0, dtype=tf.int32) # original width  = 800 
+#         image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 224)
+#         label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
+#     else:
+#         image_train   = tf.image.resize(image_train, [224, 224])
+#         label_train   = tf.image.resize(label_train, [224, 224])
+
+#     if sample_rvs[1] > 0.5:
+#         image_train = tf.image.flip_left_right(image_train)
+#         label_train = tf.image.flip_left_right(label_train)
+
+#     if sample_rvs[2] > 0.5:
+#         num_transforms = 3
+#         image_transform_rvs   = tf.random.uniform(shape=[num_transforms])
+#         image_transform_order = tf.random.shuffle(tf.range(num_transforms)) 
+
+#         for image_transform_index in image_transform_order:
+#             if image_transform_rvs[image_transform_index] > 0.5:
+#                 if image_transform_index == 0:
+#                     image_train = tf.image.random_brightness(image_train, 0.1)      # randomly add a bias to all pixels
+#                 elif image_transform_index == 1:
+#                     image_train = tf.image.random_contrast(image_train, 0.5, 2.0)   # randomly scales deviation from mean
+#                 else:
+#                     image_train = tf.image.random_saturation(image_train, 0.5, 2.0) # randomly scale saturation in HSV space
+
+#     image_train = tf.image.convert_image_dtype(image_train, dtype=tf.uint8, saturate=True)
+#     label_train = tf.image.convert_image_dtype(label_train, dtype=tf.uint8, saturate=True)
+
+#     return image_train, label_train
+
+# def tf_val_function(instance_dict):
+#     image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
+#     label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
+    
+#     image_val   = tf.image.resize(image_val, [224, 224], method='bilinear', antialias=True)
+#     label_val   = tf.image.resize(label_val, [224, 224], method='bilinear', antialias=True)
+
+#     image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=False)
+#     label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=False)    
+    
+#     return image_val, label_val
+
+
 def tf_augment_function(instance_dict):
     """ Helper function to wrap imgaug training augmentation into a tf numpy_function """
     image_shape = [None, 224, 224, 3]
@@ -121,6 +173,7 @@ def tf_val_augment_function(instance_dict):
 
     return image, label
 
+
 if __name__ == '__main__':
     import os
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -143,9 +196,8 @@ if __name__ == '__main__':
     train_dataset = train_dataset.shuffle(5, reshuffle_each_iteration=True)
     train_dataset = train_dataset.map(parse_function)
     train_dataset = train_dataset.batch(16)
-    train_dataset = train_dataset.map(tf_augment_function,
-                                      num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+    train_dataset = train_dataset.map(tf_val_augment_function)
+    train_dataset = train_dataset.prefetch(buffer_size=32)
 
     for ind, (img_aug, seg_aug) in enumerate(train_dataset):
         # Preview some of the loaded images and labels for debugging.
