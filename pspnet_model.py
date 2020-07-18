@@ -83,10 +83,17 @@ class PSPNetModel():
 
         x = fmaps[2]
         _, x_height, x_width, x_channels = x.shape  
-        pool_factors = [1,2,4]
+        pool_size = [1, 2, 4, 8]
         pool_outputs = [x]
 
         for pf in pool_factors:
+            pool_size = (pf, pf)
+            y = AveragePooling2D(pool_size, padding='same')(x)
+            y = Conv2D(512, (1,1), padding='same', activation='relu')(y)
+            y = BatchNormalization()(y)
+            pool_outputs.append(y)
+
+        pdb.set_trace()
 
 
 
@@ -320,6 +327,8 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "6"  # choose which GPU to run on.
 
     model = PSPNetModel(backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4)
+    
+    """
     parse_fun = partial(dl.parse_image, num_seg_classes=13, crop_bbox=[0, 0, 450, 800])
 
     TRAINDIR = './train/images/'
@@ -343,3 +352,4 @@ if __name__ == '__main__':
     # # PREDICTIONS
     # model.load_weights('./log/carla_psp_mobilenetv2/seg_pred_00500_epochs')
     # model.predict_folder('./val/images/', './val/preds_psp_500/')
+    """
