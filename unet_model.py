@@ -14,7 +14,7 @@ import tensorflow.keras.backend as K
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Conv2D, BatchNormalization, concatenate, \
                                     ZeroPadding2D, UpSampling2D
-from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.optimizers import SGD, Adam
 from tensorflow.keras.callbacks import TensorBoard
 
 import utils.dataloader as dl
@@ -26,7 +26,7 @@ class UNetModel():
         This is defaulting to settings in CARLA, which has 13 semantic segmentation classes.
         https://carla.readthedocs.io/en/stable/cameras_and_sensors/#camera-semantic-segmentation
     '''
-    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=1e-2, decay=5e-4):
+    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4):
         """ Constructor with adjustable base pretrained CNN model and segmentation target size.
 
         Args:
@@ -102,16 +102,16 @@ class UNetModel():
         x = Conv2D(self._num_classes, (3, 3), padding='same', activation='softmax')(x)
         x = UpSampling2D((2, 2))(x)
 
-        seg_model = Model(inputs=base_model.input, outputs=x, name='seg_model')
+        unet_model = Model(inputs=base_model.input, outputs=x, name='unet_model')
 
-        seg_model.compile(
+        unet_model.compile(
             optimizer=SGD(lr=self._init_lr, momentum=0.9, nesterov=True, clipnorm=10.),
             loss=UNetModel._soft_dice_loss(),
             metrics=[UNetModel._mean_intersection_over_union()]
         )
 
-        print(seg_model.summary())
-        return seg_model
+        print(unet_model.summary())
+        return unet_model
 
     @staticmethod
     def _mean_intersection_over_union(epsilon=1e-10):
@@ -187,19 +187,19 @@ class UNetModel():
         train_dataset = train_dataset.shuffle(buffer_size=len(train_image_list),
                                               reshuffle_each_iteration=True)
         train_dataset = train_dataset.map(parse_function)
-        train_dataset = train_dataset.batch(batch_size)
         train_dataset = train_dataset.map(tf_augment_function)
+        train_dataset = train_dataset.batch(batch_size)
         train_dataset = train_dataset.prefetch(buffer_size=2*batch_size)
 
         val_dataset = tf.data.Dataset.from_tensor_slices(val_img_list)
         val_dataset = val_dataset.map(parse_function)
-        val_dataset = val_dataset.batch(batch_size)
         val_dataset = val_dataset.map(tf_val_augment_function)
+        val_dataset = val_dataset.batch(batch_size)
         val_dataset = val_dataset.prefetch(buffer_size=2*batch_size)
 
         init_lr = K.get_value(self._model.optimizer.lr)
-
-        tensorboard = TensorBoard(log_dir=logdir, histogram_freq=0, write_graph=False)
+        
+        tensorboard = TensorBoard(log_dir=logdir, profile_batch='5,10', histogram_freq=0, write_graph=False)
         tensorboard.set_model(self._model)
 
         for epoch in range(num_epochs):
@@ -302,7 +302,7 @@ class UNetModel():
 if __name__ == '__main__':
     import os
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # choose which GPU to run on.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "6"  # choose which GPU to run on.
     '''
     # (1) Loss Function Testing
     loss_fn = UNetModel._soft_dice_loss()
@@ -326,7 +326,7 @@ if __name__ == '__main__':
     '''
 
     # (2) Prediction test
-    model = UNetModel(backbone='MobileNetV2', num_classes=13)
+    model = UNetModel(backbone='MobileNetV2', num_classes=13, init_lr=5e-2, decay=5e-4)
     parse_fun = partial(dl.parse_image, num_seg_classes=13, crop_bbox=[0, 0, 450, 800])
 
     TRAINDIR = './train/images/'
@@ -334,16 +334,19 @@ if __name__ == '__main__':
     VALDIR = './val/images/'
     val_imgs = glob.glob(VALDIR + '*.png')
 
+    
     model.fit_model(train_imgs,
                     val_imgs,
                     parse_function=parse_fun,
-                    tf_augment_function=dl.tf_augment_function,
-                    tf_val_augment_function=dl.tf_val_augment_function,
-                    logdir='./log/carla_mobilenetv2_test/',
-                    num_epochs=3000,
+                    tf_augment_function=dl.tf_train_function,
+                    tf_val_augment_function=dl.tf_val_function,
+                    logdir='./log/carla_mobilenetv2_test3/',
+                    num_epochs=501,
                     batch_size=16,
                     log_epoch_freq=10,
                     save_epoch_freq=500)
+    
 
-    #model.load_weights('')
-    #model.predict_folder('./val/images/', './val/preds/')
+    # # PREDICTIONS
+    # model.load_weights('./log/carla_mobilenetv2_test/seg_pred_00500_epochs')
+    # model.predict_folder('./val/images/', './val/preds_500/')
