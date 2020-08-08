@@ -1,0 +1,6 @@
+*.png
+*.pyc
+train/
+val/
+log/
+preds/

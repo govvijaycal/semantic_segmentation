@@ -1,117 +1,35 @@
-""" This provides a UNet semantic segmentation model implementation, tuned for settings with
-    a CARLA dataset (13 classes) and 224 x 224 image input.  This is based on the implementation
-    from https://github.com/divamgupta/image-segmentation-keras.
+""" Segmentation Model Base Class Implementation.
+    Essentially implements all training, loss, and prediction functions,
+    but leaves network architecture to subclass implementation.
 """
 import glob
 from datetime import datetime
 from functools import partial
 import numpy as np
 from PIL import Image
+from abc import ABC, abstractmethod
 
 import tensorflow as tf
 import tensorflow.keras.backend as K
-
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Conv2D, BatchNormalization, concatenate, \
-                                    ZeroPadding2D, UpSampling2D
-from tensorflow.keras.optimizers import SGD, Adam
 from tensorflow.keras.callbacks import TensorBoard
 
-import utils.dataloader as dl
-
-class UNetModel():
-    '''
-        UNet Model, adapted from https://github.com/divamgupta/image-segmentation-keras.
-
-        This is defaulting to settings in CARLA, which has 13 semantic segmentation classes.
-        https://carla.readthedocs.io/en/stable/cameras_and_sensors/#camera-semantic-segmentation
-    '''
-    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4):
-        """ Constructor with adjustable base pretrained CNN model and segmentation target size.
-
-        Args:
-            backbone: Pretrained CNN backbone model used for feature extraction.
-            num_classes: Number of segmentation classes to predict.
-            init_lr: initial learning rate to use under the SGD with Momentum optimizer
-            decay: time-based learning rate decay rate (epoch)
-        """
-        for key in list(locals()):
-            if key == 'self':
-                pass
-            else:
-                setattr(self, '_%s' % key, locals()[key])
-
-        # Based on backbone selection, pick out 4 feature maps used in the UNet architecture.
-        if self._backbone == 'MobileNetV2':
-            self._feature_map_list = ['block_1_expand_relu', 'block_3_expand_relu',
-                                      'block_6_expand_relu', 'block_13_expand_relu']
-        elif self._backbone == 'ResNet50':
-            self._feature_map_list = ['conv1_conv', 'conv2_block3_out',
-                                      'conv3_block4_out', 'conv4_block6_out']
+class SegModelBase(ABC):
+    
+    def __init__(self):
+        """ Constructor.  Details of the model architecture are to be implemented by subclasses. """
+        
+        if hasattr(self, '_decay'):
+            pass
         else:
-            raise ValueError("Invalid backbone selection.")
+            self._decay = 0.0
 
         self._trained = False
         self._model = self._create_model()
 
+    @abstractmethod
     def _create_model(self):
-        """ Model construction method called from constructor. """
-
-        # ENCODER: Pretrained and frozen CNN model used to extract feature maps (fmaps).
-        if self._backbone == 'MobileNetV2':
-            from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2
-            base_model_fn = MobileNetV2
-        elif self._backbone == 'ResNet50':
-            from tensorflow.keras.applications.resnet50 import ResNet50
-            base_model_fn = ResNet50
-        else:
-            raise ValueError("Invalid backbone selection.")
-
-        base_model = base_model_fn(include_top=False,
-                                   weights='imagenet',
-                                   input_shape=(224, 224, 3),
-                                   pooling=None)
-        for layer in base_model.layers:
-            layer.trainable = False
-        fmaps = [base_model.get_layer(fmap_name).output for fmap_name in self._feature_map_list]
-
-        # DECODER: Learned from scratch.  Output size is related to size of feature maps
-        #          in fmaps.
-        x = ZeroPadding2D((1, 1))(fmaps[3])
-        x = Conv2D(512, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = UpSampling2D((2, 2))(x)
-
-        x = concatenate([x, fmaps[2]], axis=-1)
-        x = ZeroPadding2D((1, 1))(x)
-        x = Conv2D(256, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = UpSampling2D((2, 2))(x)
-
-        x = concatenate([x, fmaps[1]], axis=-1)
-        x = ZeroPadding2D((1, 1))(x)
-        x = Conv2D(128, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = UpSampling2D((2, 2))(x)
-
-        x = concatenate([x, fmaps[0]], axis=-1)
-        x = ZeroPadding2D((1, 1))(x)
-        x = Conv2D(64, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-
-        x = Conv2D(self._num_classes, (3, 3), padding='same', activation='softmax')(x)
-        x = UpSampling2D((2, 2))(x)
-
-        unet_model = Model(inputs=base_model.input, outputs=x, name='unet_model')
-
-        unet_model.compile(
-            optimizer=SGD(lr=self._init_lr, momentum=0.9, nesterov=True, clipnorm=10.),
-            loss=UNetModel._soft_dice_loss(),
-            metrics=[UNetModel._mean_intersection_over_union()]
-        )
-
-        print(unet_model.summary())
-        return unet_model
+        """ Model architecture defined by subclass.  Creates self._model, a Keras compiled model. """
+        pass
 
     @staticmethod
     def _mean_intersection_over_union(epsilon=1e-10):
@@ -199,7 +117,7 @@ class UNetModel():
 
         init_lr = K.get_value(self._model.optimizer.lr)
         
-        tensorboard = TensorBoard(log_dir=logdir, profile_batch='5,10', histogram_freq=0, write_graph=False)
+        tensorboard = TensorBoard(log_dir=logdir, histogram_freq=0, write_graph=False)
         tensorboard.set_model(self._model)
 
         for epoch in range(num_epochs):
@@ -271,14 +189,26 @@ class UNetModel():
         img = img_raw.astype(np.float32) / 127.5 - 1.0
         return np.squeeze(self._model.predict(img))  # remove batch dimension
 
-    def predict_folder(self, image_dir, res_dir):
+    def predict_folder(self, image_dir, res_dir, apply_color_palette=True, crop_bbox=[0,0,800,448], resize_shape=None):
         """ Prediction applied to a full image_dir and then saved in res_dir.
         This function simply runs predictions on all images in image_dir and saves to res_dir.
         The argmax is taken, so the results are a grayscale image and not the full softmax output.
         It does not do any preprocessing (e.g. cropping) except for image resizing.
         It also does not do evaluation, as labels are not considered even if available.
+
+        Args:
+            image_dir: location with images to make predictions on
+            res_dir: location to save prediction result images             
+            apply_color_palette: convert label values with a color palette (CARLA)
+            crop_bbox: None or [x_min, y_min, x_max, y_max].
+            resize_shape: None or [width, height]
         """
+        import os
         os.makedirs(res_dir, exist_ok=True)
+
+        import sys
+        sys.path.insert(0, '..')
+        from utils import apply_color_palette
 
         img_list = glob.glob(image_dir + '*.png')
         img_list.extend(glob.glob(image_dir + '*.jpg')) # both png/jpg supported
@@ -288,7 +218,10 @@ class UNetModel():
             # While this could be done fully in tf, I want to make sure it can be
             # deployed with numpy, e.g. for real-time image acquisition.
             img_raw = Image.open(imagepath).convert('RGB')
-            img_raw = np.array(img_raw.resize((224, 224)))
+            if crop_bbox:
+                img_raw = img_raw.crop(box=tuple(crop_bbox))
+            if resize_shape:
+                img_raw = np.array(img_raw.resize(tuple(resize_shape)))
 
             seg_pred = self.predict_instance(img_raw)
             savepath = imagepath.replace(image_dir, res_dir)
@@ -297,56 +230,9 @@ class UNetModel():
             print('  savepath: ', savepath)
 
             label_img = np.argmax(seg_pred, axis=-1).astype(np.uint8)
-            Image.fromarray(label_img).save(savepath)
 
-if __name__ == '__main__':
-    import os
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "6"  # choose which GPU to run on.
-    '''
-    # (1) Loss Function Testing
-    loss_fn = UNetModel._soft_dice_loss()
-    metric_fn = UNetModel._mean_intersection_over_union()
-
-    label = np.random.choice(3, size=(5, 100, 200))
-    y_true = tf.constant(to_categorical(label, num_classes=3), dtype=tf.float32)
-
-    y_pred_opp = tf.constant(np.logical_not(y_true), dtype=tf.float32)
-    y_pred_uniform = tf.constant( 1. / 3. * np.ones((5, 100, 200, 3)), dtype=tf.float32)
-
-    print('Soft Dice Loss Test')
-    print(' EXACT: ', loss_fn(y_true, y_true))
-    print(' OPPOSITE: ', loss_fn(y_true, y_pred_opp))
-    print(' UNIFORM: ', loss_fn(y_true, y_pred_uniform))
-
-    print('MIoU Metric Test')
-    print(' EXACT: ',    metric_fn(y_true, y_true))
-    print(' OPPOSITE: ', metric_fn(y_true, y_pred_opp))
-    print(' UNIFORM: ',  metric_fn(y_true, y_pred_uniform))
-    '''
-
-    # (2) Prediction test
-    model = UNetModel(backbone='MobileNetV2', num_classes=13, init_lr=5e-2, decay=5e-4)
-    parse_fun = partial(dl.parse_image, num_seg_classes=13, crop_bbox=[0, 0, 450, 800])
-
-    TRAINDIR = './train/images/'
-    train_imgs = glob.glob(TRAINDIR + '*.png')
-    VALDIR = './val/images/'
-    val_imgs = glob.glob(VALDIR + '*.png')
-
-    
-    model.fit_model(train_imgs,
-                    val_imgs,
-                    parse_function=parse_fun,
-                    tf_augment_function=dl.tf_train_function,
-                    tf_val_augment_function=dl.tf_val_function,
-                    logdir='./log/carla_mobilenetv2_test3/',
-                    num_epochs=501,
-                    batch_size=16,
-                    log_epoch_freq=10,
-                    save_epoch_freq=500)
-    
-
-    # # PREDICTIONS
-    # model.load_weights('./log/carla_mobilenetv2_test/seg_pred_00500_epochs')
-    # model.predict_folder('./val/images/', './val/preds_500/')
+            if apply_color_palette:
+                pal_img = convert_label_to_palette_img(label_img)
+                Image.fromarray(pal_img).save(savepath)
+            else:
+                Image.fromarray(label_img).save(savepath)

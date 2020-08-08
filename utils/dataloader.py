@@ -135,14 +135,14 @@ def tf_train_function(instance_dict):
 
     return image_train, label_train
 
-def tf_val_function(instance_dict):
+def tf_val_function(instance_dict, image_size=320):
     # image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
     # label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
     
 
 
-    image_val   = tf.image.resize(instance_dict['image'], [224, 224], method='nearest', antialias=True)
-    label_val   = tf.image.resize(instance_dict['label'], [224, 224], method='nearest', antialias=True)
+    image_val   = tf.image.resize(instance_dict['image'], [image_size, image_size], method='nearest', antialias=True)
+    label_val   = tf.image.resize(instance_dict['label'], [image_size, image_size], method='nearest', antialias=True)
 
     # image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
     # label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=True)    
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     train_dataset = train_dataset.batch(16)
     train_dataset = train_dataset.prefetch(buffer_size=32)
 
-    run_viz = False
+    run_viz = True
 
     start_time = time.time()
     num_batches = 0
