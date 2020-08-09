@@ -8,10 +8,15 @@ from functools import partial
 import numpy as np
 from PIL import Image
 from abc import ABC, abstractmethod
+import os
+import sys
 
 import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.callbacks import TensorBoard
+
+sys.path.insert(0, '..')
+from utils.apply_color_palette import convert_label_to_palette_img
 
 class SegModelBase(ABC):
     
@@ -189,7 +194,7 @@ class SegModelBase(ABC):
         img = img_raw.astype(np.float32) / 127.5 - 1.0
         return np.squeeze(self._model.predict(img))  # remove batch dimension
 
-    def predict_folder(self, image_dir, res_dir, apply_color_palette=True, crop_bbox=[0,0,800,448], resize_shape=None):
+    def predict_folder(self, image_dir, res_dir, apply_color_palette=True, crop_bbox=None, resize_shape=None):
         """ Prediction applied to a full image_dir and then saved in res_dir.
         This function simply runs predictions on all images in image_dir and saves to res_dir.
         The argmax is taken, so the results are a grayscale image and not the full softmax output.
@@ -203,12 +208,8 @@ class SegModelBase(ABC):
             crop_bbox: None or [x_min, y_min, x_max, y_max].
             resize_shape: None or [width, height]
         """
-        import os
+        
         os.makedirs(res_dir, exist_ok=True)
-
-        import sys
-        sys.path.insert(0, '..')
-        from utils import apply_color_palette
 
         img_list = glob.glob(image_dir + '*.png')
         img_list.extend(glob.glob(image_dir + '*.jpg')) # both png/jpg supported
@@ -221,7 +222,8 @@ class SegModelBase(ABC):
             if crop_bbox:
                 img_raw = img_raw.crop(box=tuple(crop_bbox))
             if resize_shape:
-                img_raw = np.array(img_raw.resize(tuple(resize_shape)))
+                img_raw = img_raw.resize(tuple(resize_shape))
+            img_raw = np.array(img_raw)
 
             seg_pred = self.predict_instance(img_raw)
             savepath = imagepath.replace(image_dir, res_dir)

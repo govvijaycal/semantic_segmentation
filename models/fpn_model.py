@@ -5,10 +5,10 @@
 
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Conv2D, BatchNormalization, concatenate, \
-                                    ZeroPadding2D, UpSampling2D
+                                    ZeroPadding2D, UpSampling2D, Softmax
 from tensorflow.keras.optimizers import SGD, Adam
 
-from seg_model_base import SegModelBase
+from .seg_model_base import SegModelBase
 
 class FPNModel(SegModelBase):
 
@@ -69,33 +69,34 @@ class FPNModel(SegModelBase):
         p3 = Conv2D(256, (1,1), padding='same')(fmaps[3])
         p2 = Conv2D(256, (1,1), padding='same')(fmaps[2])
         p1 = Conv2D(256, (1,1), padding='same')(fmaps[1])
-        p0 = Conv2D(256, (1,1), padding='same')(fmaps[0])
+        # p0 = Conv2D(256, (1,1), padding='same')(fmaps[0])
 
         p2 = p2 + UpSampling2D((2,2))(p3)
         p1 = p1 + UpSampling2D((2,2))(p2)
-        p0 = p0 + UpSampling2D((2,2))(p1)
+        # p0 = p0 + UpSampling2D((2,2))(p1)
 
-        seg3 = Conv2D(256, (3,3), padding='same')(p3)
-        seg2 = Conv2D(256, (3,3), padding='same')(p2)
-        seg1 = Conv2D(256, (3,3), padding='same')(p1)
-        seg0 = Conv2D(256, (3,3), padding='same')(p0)
+        seg3 = Conv2D(256, (3,3), padding='same')(p3) # 1/16
+        seg2 = Conv2D(256, (3,3), padding='same')(p2) # 1/8
+        seg1 = Conv2D(256, (3,3), padding='same')(p1) # 1/4
+        # seg0 = Conv2D(256, (3,3), padding='same')(p0)
 
         # Segmentation Part: get a set of maps of the same shape and apply final softmax on their sum.
-        for _ in range(3):
-            seg3 = Conv2D(64, (3,3), padding='same', activation='relu')(seg3)
-            seg3 = UpSampling2D((2,2))(seg3)
-        
         for _ in range(2):
+            seg3 = Conv2D(64, (3,3), padding='same', activation='relu')(seg3)
+            seg3 = UpSampling2D((2,2), interpolation='bilinear')(seg3)
+        
+        for _ in range(1):
             seg2 = Conv2D(64, (3,3), padding='same', activation='relu')(seg2)
-            seg2 = UpSampling2D((2,2))(seg2)
+            seg2 = UpSampling2D((2,2), interpolation='bilinear')(seg2)
 
         seg1 = Conv2D(64, (3,3), padding='same', activation='relu')(seg1)
-        seg1 = UpSampling2D((2,2))(seg1)    
+        # seg1 = UpSampling2D((2,2))(seg1)    
 
-        seg0 = Conv2D(64, (3,3), padding='same', activation='relu')(seg0)
+        # seg0 = Conv2D(64, (3,3), padding='same', activation='relu')(seg0)
 
-        out = Conv2D(self._num_classes, (3, 3), padding='same', activation='softmax')(seg0 + seg1 + seg2 + seg3)
-        out = UpSampling2D((2, 2))(out)
+        out = Conv2D(self._num_classes, (3, 3), padding='same')(seg1 + seg2 + seg3)
+        out = UpSampling2D((4, 4), interpolation='bilinear')(out)
+        out = Softmax()(out)
 
         fpn_model = Model(inputs=base_model.input, outputs=out, name='fpn_model')
 
@@ -104,7 +105,7 @@ class FPNModel(SegModelBase):
             loss=FPNModel._soft_dice_loss(),
             metrics=[FPNModel._mean_intersection_over_union()]
         )
-
+        
         return fpn_model
 
 if __name__ == '__main__':

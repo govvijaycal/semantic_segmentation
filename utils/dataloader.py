@@ -1,6 +1,5 @@
 """ Utility functions for loading image/seg image pairs and performing augmentation.
-    This is tuned for a Carla dataset (13 classes) with 800x600 images with crop
-    to a 224x224 augmented image.
+    This is tuned for a Carla (13 classes) with 800x600 images cropped to 800x448.
 """
 import glob
 from functools import partial
@@ -19,7 +18,7 @@ def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
     Args:
         img_path: Path to directory containing images (assumed .png).
         num_seg_classes: Number of segmentation classes for one-hot encoding.
-        crop_bbox: [start_x, start_y, delta_x, delta_y] to crop image if not None
+        crop_bbox: [start_y, start_x, delta_y, delta_x] to crop image if not None
 
     Returns:
         A dictionary with key "image" corresponding to loaded image,
@@ -49,6 +48,132 @@ def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
 
     return {'image': image, 'label': mask, 'name': name}
 
+def tf_train_function(instance_dict):
+    image_train = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
+    label_train = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
+
+    sample_rvs = tf.random.uniform(shape=[4])
+
+    # Step 1: Randomly crop to a 224 by 224 subimage or leave at full resolution
+    image_height, image_width, _ = image_train.shape
+    if sample_rvs[0] > 0.7:
+        scale_factor = 1.5
+        target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
+        image_train = tf.image.resize(image_train, target_size, method='bilinear')
+        label_train = tf.image.resize(label_train, target_size, method='nearest')
+    elif sample_rvs[1] > 0.4:
+        scale_factor = 0.75
+        target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
+        image_train = tf.image.resize(image_train, target_size, method='bilinear')
+        label_train = tf.image.resize(label_train, target_size, method='nearest')
+    else:
+        target_size = (int(image_height), int(image_width))
+
+    image_height, image_width = target_size
+    offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
+    offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
+
+    offset_rvs = tf.random.uniform(shape=[2])    
+    offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
+    offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
+    image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 224)
+    label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
+
+    # Step 2: Randomly flip left/right
+    if sample_rvs[1] > 0.4:
+        image_train = tf.image.flip_left_right(image_train)
+        label_train = tf.image.flip_left_right(label_train)
+
+    # Step 3: Randomly adjust brightness, contrast, and/or saturation.
+    if sample_rvs[2] > 0.4:
+        num_transforms = 3
+        image_transform_rvs   = tf.random.uniform(shape=[num_transforms])
+        image_transform_order = tf.random.shuffle(tf.range(num_transforms)) 
+
+        for image_transform_index in image_transform_order:
+            if image_transform_rvs[image_transform_index] > 0.5:
+                if image_transform_index == 0:
+                    image_train = tf.image.random_brightness(image_train, 0.1)      # randomly add a bias to all pixels
+                elif image_transform_index == 1:
+                    image_train = tf.image.random_contrast(image_train, 0.5, 2.0)   # randomly scales deviation from mean
+                else:
+                    image_train = tf.image.random_saturation(image_train, 0.5, 2.0) # randomly scale saturation in HSV space
+
+    image_train = tf.image.convert_image_dtype(image_train, dtype=tf.uint8, saturate=True)
+    label_train = tf.image.convert_image_dtype(label_train, dtype=tf.uint8, saturate=True)
+
+    return image_train, label_train
+
+def tf_val_function(instance_dict):
+    image_val   = instance_dict['image']
+    label_val   = instance_dict['label']
+    return image_val, label_val
+
+if __name__ == '__main__':
+    import os
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # choose which GPU to run on.
+
+    import time
+
+    import matplotlib.pyplot as plt
+
+    TRAIN_DIR = './train/'
+    VAL_DIR = './val/'
+
+    np.random.seed(0)
+    train_imgs = np.array(glob.glob(TRAIN_DIR + 'images/*.png'))
+    val_imgs = np.array(glob.glob(VAL_DIR + 'images/*.png'))
+    np.random.shuffle(train_imgs)
+    np.random.shuffle(val_imgs)
+
+    parse_function = partial(parse_image, num_seg_classes=13, crop_bbox=[0, 0, 448, 800])
+
+    train_dataset = tf.data.Dataset.from_tensor_slices(train_imgs)
+    train_dataset = train_dataset.shuffle(5, reshuffle_each_iteration=True)
+    train_dataset = train_dataset.map(parse_function)
+    train_dataset = train_dataset.map(tf_train_function)
+    train_dataset = train_dataset.batch(16)
+    train_dataset = train_dataset.prefetch(buffer_size=32)
+
+    run_viz = True
+
+    start_time = time.time()
+    num_batches = 0
+    for ind, (img_aug, seg_aug) in enumerate(train_dataset):
+        
+        if run_viz:
+            # Preview some of the loaded images and labels for debugging.
+            # Number of images shown is arbitrary, adjust as needed.
+            plt.subplot(321)
+            plt.imshow(img_aug[0])
+            plt.subplot(322)
+            plt.imshow(np.argmax(seg_aug[0], axis=-1), cmap='jet')
+
+            plt.subplot(323)
+            plt.imshow(img_aug[1])
+            plt.subplot(324)
+            plt.imshow(np.argmax(seg_aug[1], axis=-1), cmap='jet')
+
+            plt.subplot(325)
+            plt.imshow(img_aug[2])
+            plt.subplot(326)
+            plt.imshow(np.argmax(seg_aug[2], axis=-1), cmap='jet')
+
+            plt.show()
+
+            if ind > 1:
+                break
+
+        num_batches = ind
+
+    end_time = time.time()
+
+    print('%d Batches took %.3f seconds' % (num_batches, end_time - start_time))
+
+###### IMGAUG CODE FOR REFERENCE #######
+# This is nice but involves OpenCV under the hood.  So more CPU Usage + slower than tf.image.
+# Keeping this in case I want to revert back to these more aggressive augmentations.
 # def augment_function(image, label):
 #     """ Takes in an image, segmentation label pair and returns augmented variants for training.
 #     Note that geometric augmentations are done first to rescale/flip and get a 224x224 image.
@@ -95,61 +220,6 @@ def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
 #     image_val, label_val = seq(images=image, segmentation_maps=label) # image_val is a list
 #     return np.array(image_val), np.array(label_val)
 
-def tf_train_function(instance_dict):
-    image_train = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
-    label_train = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
-
-    sample_rvs = tf.random.uniform(shape=[4])
-
-    # random 224 x 224 crop or full image resize
-    if sample_rvs[0] > 0.4:    
-        offset_rvs = tf.random.uniform(shape=[2])    
-        offset_height = tf.cast(offset_rvs[0] * 226.0, dtype=tf.int32) # original height = 450
-        offset_width  = tf.cast(offset_rvs[1] * 576.0, dtype=tf.int32) # original width  = 800 
-        image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 224)
-        label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
-    else:
-        image_train   = tf.image.resize(image_train, [224, 224], method='nearest', antialias=True)
-        label_train   = tf.image.resize(label_train, [224, 224], method='nearest', antialias=True)
-
-    if sample_rvs[1] > 0.4:
-        image_train = tf.image.flip_left_right(image_train)
-        label_train = tf.image.flip_left_right(label_train)
-
-    if sample_rvs[2] > 0.4:
-        num_transforms = 3
-        image_transform_rvs   = tf.random.uniform(shape=[num_transforms])
-        image_transform_order = tf.random.shuffle(tf.range(num_transforms)) 
-
-        for image_transform_index in image_transform_order:
-            if image_transform_rvs[image_transform_index] > 0.5:
-                if image_transform_index == 0:
-                    image_train = tf.image.random_brightness(image_train, 0.1)      # randomly add a bias to all pixels
-                elif image_transform_index == 1:
-                    image_train = tf.image.random_contrast(image_train, 0.5, 2.0)   # randomly scales deviation from mean
-                else:
-                    image_train = tf.image.random_saturation(image_train, 0.5, 2.0) # randomly scale saturation in HSV space
-
-    image_train = tf.image.convert_image_dtype(image_train, dtype=tf.uint8, saturate=True)
-    label_train = tf.image.convert_image_dtype(label_train, dtype=tf.uint8, saturate=True)
-
-    return image_train, label_train
-
-def tf_val_function(instance_dict, image_size=320):
-    # image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
-    # label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
-    
-
-
-    image_val   = tf.image.resize(instance_dict['image'], [image_size, image_size], method='nearest', antialias=True)
-    label_val   = tf.image.resize(instance_dict['label'], [image_size, image_size], method='nearest', antialias=True)
-
-    # image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
-    # label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=True)    
-    
-    return image_val, label_val
-
-
 # def tf_augment_function(instance_dict):
 #     """ Helper function to wrap imgaug training augmentation into a tf numpy_function """
 #     image_shape = [None, 224, 224, 3]
@@ -174,66 +244,3 @@ def tf_val_function(instance_dict, image_size=320):
 #     label.set_shape(label_shape)
 
 #     return image, label
-
-
-if __name__ == '__main__':
-    import os
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # choose which GPU to run on.
-
-    import time
-
-    import matplotlib.pyplot as plt
-
-    TRAIN_DIR = './train/'
-    VAL_DIR = './val/'
-
-    np.random.seed(0)
-    train_imgs = np.array(glob.glob(TRAIN_DIR + 'images/*.png'))
-    val_imgs = np.array(glob.glob(VAL_DIR + 'images/*.png'))
-    np.random.shuffle(train_imgs)
-    np.random.shuffle(val_imgs)
-
-    parse_function = partial(parse_image, num_seg_classes=13, crop_bbox=[0, 0, 450, 800])
-
-    train_dataset = tf.data.Dataset.from_tensor_slices(train_imgs)
-    train_dataset = train_dataset.shuffle(5, reshuffle_each_iteration=True)
-    train_dataset = train_dataset.map(parse_function)
-    train_dataset = train_dataset.map(tf_val_function)
-    train_dataset = train_dataset.batch(16)
-    train_dataset = train_dataset.prefetch(buffer_size=32)
-
-    run_viz = True
-
-    start_time = time.time()
-    num_batches = 0
-    for ind, (img_aug, seg_aug) in enumerate(train_dataset):
-        
-        if run_viz:
-            # Preview some of the loaded images and labels for debugging.
-            # Number of images shown is arbitrary, adjust as needed.
-            plt.subplot(321)
-            plt.imshow(img_aug[0])
-            plt.subplot(322)
-            plt.imshow(np.argmax(seg_aug[0], axis=-1), cmap='jet')
-
-            plt.subplot(323)
-            plt.imshow(img_aug[1])
-            plt.subplot(324)
-            plt.imshow(np.argmax(seg_aug[1], axis=-1), cmap='jet')
-
-            plt.subplot(325)
-            plt.imshow(img_aug[2])
-            plt.subplot(326)
-            plt.imshow(np.argmax(seg_aug[2], axis=-1), cmap='jet')
-
-            plt.show()
-
-            if ind > 1:
-                break
-
-        num_batches = ind
-
-    end_time = time.time()
-
-    print('%d Batches took %.3f seconds' % (num_batches, end_time - start_time))
