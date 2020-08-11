@@ -105,8 +105,24 @@ def tf_train_function(instance_dict):
     return image_train, label_train
 
 def tf_val_function(instance_dict):
-    image_val   = instance_dict['image']
-    label_val   = instance_dict['label']
+    # Sample a 224 by 224 crop for validation.  Helps with memory issues.
+    image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
+    label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
+
+    image_height, image_width, _ = image_val.shape
+
+    offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
+    offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
+
+    offset_rvs = tf.random.uniform(shape=[2])    
+    offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
+    offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
+    image_val     = tf.image.crop_to_bounding_box(image_val, offset_height, offset_width, 224, 224)
+    label_val     = tf.image.crop_to_bounding_box(label_val, offset_height, offset_width, 224, 224)
+
+    image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
+    label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=True)
+
     return image_val, label_val
 
 if __name__ == '__main__':

@@ -26,16 +26,25 @@ class UNetModel(SegModelBase):
             else:
                 setattr(self, '_%s' % key, locals()[key])
 
-        # Based on backbone selection, pick out 4 feature maps used in the UNet architecture.
+        # Based on backbone selection, pick out 5 feature maps to use for the encoder in UNet.
+        # Current implementation drops the 1/32 resolution feature map but could be added later.
         if self._backbone == 'MobileNetV2':
-            self._feature_map_list = ['block_1_expand_relu', 'block_3_expand_relu',
-                                      'block_6_expand_relu', 'block_13_expand_relu']
+            self._feature_map_list = ['block_1_expand_relu',    # 1/2
+                                      'block_3_expand_relu',    # 1/4
+                                      'block_6_expand_relu',    # 1/8 
+                                      'block_13_expand_relu',   # 1/16
+                                      'block_16_depthwise_relu' # 1/32
+                                     ]
         elif self._backbone == 'ResNet50':
-            self._feature_map_list = ['conv1_conv', 'conv2_block3_out',
-                                      'conv3_block4_out', 'conv4_block6_out']
+            self._feature_map_list = ['conv1_relu',             # 1/2
+                                      'conv2_block3_out',       # 1/4
+                                      'conv3_block4_out',       # 1/8
+                                      'conv4_block6_out',       # 1/16
+                                      'conv5_block3_out'        # 1/32
+                                     ]
         else:
             raise ValueError("Invalid backbone selection.")
-
+        
         super().__init__()
 
     def _create_model(self):

@@ -117,8 +117,8 @@ class SegModelBase(ABC):
         val_dataset = tf.data.Dataset.from_tensor_slices(val_img_list)
         val_dataset = val_dataset.map(parse_function)
         val_dataset = val_dataset.map(tf_val_augment_function)
-        val_dataset = val_dataset.batch(batch_size)
-        val_dataset = val_dataset.prefetch(buffer_size=2*batch_size)
+        val_dataset = val_dataset.batch(2) # smaller since we use full image resolution here
+        #val_dataset = val_dataset.prefetch(buffer_size=2*batch_size)
 
         init_lr = K.get_value(self._model.optimizer.lr)
         
