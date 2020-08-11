@@ -10,6 +10,11 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, concatenate, \
                                     ZeroPadding2D, UpSampling2D, AveragePooling2D
 from tensorflow.keras.optimizers import SGD, Adam
 
+# Hacky relative import to models/ directory.
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, script_dir)
 from seg_model_base import SegModelBase
 
 class PSPNetModel(SegModelBase):

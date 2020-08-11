@@ -9,7 +9,12 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, concatenate, \
 from tensorflow.keras.optimizers import SGD, Adam
 from tensorflow_addons.layers import GroupNormalization
 
-from .seg_model_base import SegModelBase
+# Hacky relative import to models/ directory.
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, script_dir)
+from seg_model_base import SegModelBase
 
 class FPNModel(SegModelBase):
 
@@ -130,9 +135,11 @@ class FPNModel(SegModelBase):
 if __name__ == '__main__':
     import os
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # choose which GPU to run on.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # choose which GPU to run on.
     m = FPNModel(backbone = 'ResNet50')
 
     from tensorflow.keras.utils import plot_model
     plot_model(m._model, 'fpn_model.png')
     print(m._model.summary())
+    import time
+    time.sleep(10)

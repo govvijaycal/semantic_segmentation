@@ -3,6 +3,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - cudatoolkit=10.1
+  - cudnn=7.6
+  - cupti=10.1
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=0_gnu
   - attrs=19.3.0=py_0
@@ -98,7 +101,6 @@ dependencies:
     - h5py==2.10.0
     - httplib2==0.18.1
     - idna==2.10
-    - inplace-abn==1.0.12
     - kaggle==1.5.6
     - keras-preprocessing==1.1.2
     - kiwisolver==1.2.0
@@ -109,7 +111,6 @@ dependencies:
     - numpy==1.19.0
     - oauth2client==4.1.3
     - oauthlib==3.1.0
-    - object-detection==0.1
     - opencv-python-headless==4.3.0.36
     - opt-einsum==3.2.1
     - pandas==1.0.5
@@ -123,7 +124,7 @@ dependencies:
     - pycocotools==2.0.1
     - pydot==1.4.1
     - pydotplus==2.0.2
-    - python-graphviz==0.14.1
+    - graphviz==0.14.1
     - python-slugify==4.0.1
     - pytz==2020.1
     - pyyaml==5.3.1

@@ -7,7 +7,12 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, concatenate, \
                                     ZeroPadding2D, UpSampling2D
 from tensorflow.keras.optimizers import SGD, Adam
 
-from .seg_model_base import SegModelBase
+# Hacky relative import to models/ directory.
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, script_dir)
+from seg_model_base import SegModelBase
 
 class UNetModel(SegModelBase):
 

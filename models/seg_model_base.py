@@ -15,7 +15,11 @@ import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.callbacks import TensorBoard
 
-sys.path.insert(0, '..')
+# Hacky relative import to ../ directory to use palette conversion utils.
+import os
+import sys
+root_dir = os.path.dirname( os.path.dirname(os.path.abspath(__file__)) )
+sys.path.insert(0, root_dir)
 from utils.apply_color_palette import convert_label_to_palette_img
 
 class SegModelBase(ABC):
