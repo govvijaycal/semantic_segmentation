@@ -72,37 +72,38 @@ class UNetModel(SegModelBase):
                                    input_shape=(None, None, 3),
                                    pooling=None)
         for layer in base_model.layers:
+            layer._name = self._backbone + '/' + layer.name
             layer.trainable = False
-        fmaps = [base_model.get_layer(fmap_name).output for fmap_name in self._feature_map_list]
+        fmaps = [base_model.get_layer(self._backbone + '/' + fmap_name).output for fmap_name in self._feature_map_list]
 
         # DECODER: Learned from scratch.  Output size is related to size of feature maps
         #          in fmaps.
-        x = ZeroPadding2D((1, 1))(fmaps[3])
-        x = Conv2D(512, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = UpSampling2D((2, 2))(x)
+        seg3 = ZeroPadding2D((1, 1), name='Seg/zp11_f3')(fmaps[3])
+        seg3 = Conv2D(512, (3, 3), padding='valid', activation='relu', name='Seg/conv33_seg3')(seg3)
+        seg3 = BatchNormalization(name='Seg/BN_seg3')(seg3)
+        seg3 = UpSampling2D((2, 2), name='Seg/up22_seg3')(seg3)
 
-        x = concatenate([x, fmaps[2]], axis=-1)
-        x = ZeroPadding2D((1, 1))(x)
-        x = Conv2D(256, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = UpSampling2D((2, 2))(x)
+        seg2 = concatenate([seg3, fmaps[2]], axis=-1, name='Seg/concat_seg3')
+        seg2 = ZeroPadding2D((1, 1), name='Seg/zp11_f2')(seg2)
+        seg2 = Conv2D(256, (3, 3), padding='valid', activation='relu', name='Seg/conv33_seg2')(seg2)
+        seg2 = BatchNormalization(name='Seg/BN_seg2')(seg2)
+        seg2 = UpSampling2D((2, 2), name='Seg/up22_seg2')(seg2)
 
-        x = concatenate([x, fmaps[1]], axis=-1)
-        x = ZeroPadding2D((1, 1))(x)
-        x = Conv2D(128, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
-        x = UpSampling2D((2, 2))(x)
+        seg1 = concatenate([seg2, fmaps[1]], axis=-1, name='Seg/concat_seg2')
+        seg1 = ZeroPadding2D((1, 1), name='Seg/zp11_f1')(seg1)
+        seg1 = Conv2D(128, (3, 3), padding='valid', activation='relu', name='Seg/conv33_seg1')(seg1)
+        seg1 = BatchNormalization(name='Seg/BN_seg1')(seg1)
+        seg1 = UpSampling2D((2, 2), name='Seg/up22_seg1')(seg1)
 
-        x = concatenate([x, fmaps[0]], axis=-1)
-        x = ZeroPadding2D((1, 1))(x)
-        x = Conv2D(64, (3, 3), padding='valid', activation='relu')(x)
-        x = BatchNormalization()(x)
+        seg0 = concatenate([seg1, fmaps[0]], axis=-1, name='Seg/concat_seg1')
+        seg0 = ZeroPadding2D((1, 1), name='Seg/zp11_f0')(seg0)
+        seg0 = Conv2D(64, (3, 3), padding='valid', activation='relu', name='Seg/conv33_seg0')(seg0)
+        seg0 = BatchNormalization(name='Seg/BN_seg0')(seg0)
 
-        x = Conv2D(self._num_classes, (3, 3), padding='same', activation='softmax')(x)
-        x = UpSampling2D((2, 2))(x)
+        out = Conv2D(self._num_classes, (3, 3), padding='same', activation='softmax', name='Seg/conv33_softmax_final')(seg0)
+        out = UpSampling2D((2, 2), name='Seg/up22_final')(out)
 
-        unet_model = Model(inputs=base_model.input, outputs=x, name='unet_model')
+        unet_model = Model(inputs=base_model.input, outputs=out, name='unet_model')
 
         unet_model.compile(
             optimizer=SGD(lr=self._init_lr, momentum=0.9, nesterov=True, clipnorm=10.),
@@ -115,5 +116,31 @@ class UNetModel(SegModelBase):
 if __name__ == '__main__':
     import os
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # choose which GPU to run on.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # choose which GPU to run on.
     m = UNetModel(backbone = 'ResNet50')
+
+    import time    
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    image = np.random.random((4, 800, 448, 3)) * 255.0
+    times = []
+    
+    for i in range(100):
+        st = time.time()
+        m._model.predict(image)
+        times.append(time.time() - st)
+
+    
+    plt.plot(np.arange(100), times)
+    plt.show()
+
+    print('Mean: ', np.mean(times[5:]))
+    print('Std: ',  np.std(times[5:]))
+    print('Min: ',  np.min(times[5:]))
+    print('Max: ',  np.max(times[5:]))
+
+    print(m._model.summary())
+
+    from tensorflow.keras.utils import plot_model
+    plot_model(m._model, 'unet_resnet50.png')
