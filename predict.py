@@ -12,10 +12,10 @@ if __name__ == '__main__':
     ################## ADJUSTABLE PARAMS #####################
     ##########################################################
     NETWORK   = 'FPNModel'         # FPNModel, UNetModel
-    BACKBONE  = 'MobileNetV2'      # MobileNetv2, ResNet50
+    BACKBONE  = 'ResNet50'      # MobileNetv2, ResNet50
     N_CLASS   = 13                 # number of segmentation classes
     
-    WEIGHTS     = './log/folder/model_name'
+    WEIGHTS     = './log/carla_resnet_1/seg_pred_00100_epochs'
     IMAGE_DIR   = './val/images/'
     RES_DIR     = './val/preds_test/'
     APPLY_COLOR = True
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     CROP_BBOX_PIL = [CROP_BBOX[1], CROP_BBOX[0], CROP_BBOX[3], CROP_BBOX[2]] # PIL uses a different ordering.
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "6"  # choose which GPU to run on.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # choose which GPU to run on.
     
     ##########################################################
     ##########################################################

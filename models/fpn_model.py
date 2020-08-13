@@ -81,47 +81,43 @@ class FPNModel(SegModelBase):
         # DECODER: Learned from scratch.  Output size is related to size of feature maps
         #          in fmaps.
         # Feature Pyramid Network (p4, p3, p2, p1)
-        p4 = Conv2D(256, (1,1), padding='same')(fmaps[4])
-        p3 = Conv2D(256, (1,1), padding='same')(fmaps[3])
-        p2 = Conv2D(256, (1,1), padding='same')(fmaps[2])
+        p4 = Conv2D(256, (1,1), padding='same')(fmaps[4])        
+        p3 = Conv2D(256, (1,1), padding='same')(fmaps[3])        
+        p2 = Conv2D(256, (1,1), padding='same')(fmaps[2])        
         p1 = Conv2D(256, (1,1), padding='same')(fmaps[1])
-
+        
         p3 = p3 + UpSampling2D((2,2))(p4)
         p2 = p2 + UpSampling2D((2,2))(p3)
         p1 = p1 + UpSampling2D((2,2))(p2)
 
-        seg4 = Conv2D(256, (3,3), padding='same')(p4) # 1/32
-        seg3 = Conv2D(256, (3,3), padding='same')(p3) # 1/16
-        seg2 = Conv2D(256, (3,3), padding='same')(p2) # 1/8
+        seg4 = Conv2D(256, (3,3), padding='same')(p4) # 1/32        
+        seg3 = Conv2D(256, (3,3), padding='same')(p3) # 1/16        
+        seg2 = Conv2D(256, (3,3), padding='same')(p2) # 1/8        
         seg1 = Conv2D(256, (3,3), padding='same')(p1) # 1/4
-
+        
         # Segmentation Part: get a set of maps of the same shape and apply final softmax on their sum.
         for _ in range(3):
-            seg4 = Conv2D(64, (3,3), padding='same')(seg4)
+            seg4 = Conv2D(128, (3,3), padding='same', activation='relu')(seg4)
             seg4 = GroupNormalization(groups=4)(seg4)
-            seg4 = ReLU()(seg4)
             seg4 = UpSampling2D((2,2), interpolation='bilinear')(seg4)
 
         for _ in range(2):
-            seg3 = Conv2D(64, (3,3), padding='same')(seg3)
-            seg3 = GroupNormalization(groups=4)(seg3)
-            seg3 = ReLU()(seg3)
+            seg3 = Conv2D(128, (3,3), padding='same', activation='relu')(seg3)            
+            seg3 = GroupNormalization(groups=4)(seg3)            
             seg3 = UpSampling2D((2,2), interpolation='bilinear')(seg3)
 
         for _ in range(1):
-            seg2 = Conv2D(64, (3,3), padding='same')(seg2)
+            seg2 = Conv2D(128, (3,3), padding='same', activation='relu')(seg2)            
             seg2 = GroupNormalization(groups=4)(seg2)
-            seg2 = ReLU()(seg2)
             seg2 = UpSampling2D((2,2), interpolation='bilinear')(seg2)
             
-        seg1 = Conv2D(64, (3,3), padding='same')(seg1)
+        seg1 = Conv2D(128, (3,3), padding='same', activation='relu')(seg1)
         seg1 = GroupNormalization(groups=4)(seg1)
-        seg1 = ReLU()(seg1)
-        
-        out = Conv2D(self._num_classes, (1, 1), padding='same')(seg1 + seg2 + seg3 + seg4)
+                
+        out = Conv2D(self._num_classes, (1, 1), padding='same')(seg1 + seg2 + seg3 + seg4)        
         out = UpSampling2D((4, 4), interpolation='bilinear')(out)
         out = Softmax()(out)
-
+        
         fpn_model = Model(inputs=base_model.input, outputs=out, name='fpn_model')
 
         fpn_model.compile(
@@ -138,8 +134,28 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # choose which GPU to run on.
     m = FPNModel(backbone = 'ResNet50')
 
-    from tensorflow.keras.utils import plot_model
-    plot_model(m._model, 'fpn_model.png')
-    print(m._model.summary())
-    import time
-    time.sleep(10)
+    import time    
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    image = np.random.random((4, 800, 448, 3)) * 255.0
+    times = []
+    
+    for i in range(100):
+        st = time.time()
+        m._model.predict(image)
+        times.append(time.time() - st)
+
+    
+    plt.plot(np.arange(100), times)
+    plt.show()
+
+
+
+    # import pdb
+    # pdb.set_trace()
+    # from tensorflow.keras.utils import plot_model
+    # plot_model(m._model, 'fpn_model.png')
+    # print(m._model.summary())
+    # import time
+    # time.sleep(10)

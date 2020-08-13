@@ -11,15 +11,15 @@ if __name__ == '__main__':
     ##########################################################
     ################## ADJUSTABLE PARAMS #####################
     ##########################################################
-    NETWORK   = 'FPNModel'         # FPNModel, UNetModel
-    BACKBONE  = 'MobileNetV2'      # MobileNetv2, ResNet50
-    LOGDIR    = './log/carla_fpn/' # where to save tensorboard logging and model weights
-    N_CLASS   = 13                 # number of segmentation classes
+    NETWORK   = 'FPNModel'                         # FPNModel, UNetModel
+    BACKBONE  = 'ResNet50'                         # MobileNetv2, ResNet50
+    LOGDIR    = './log/carla_fpn_resnet_1/' # where to save tensorboard logging and model weights
+    N_CLASS   = 13                                 # number of segmentation classes
     
     INIT_LR    = 5e-2               # initial learning rate
-    DECAY      = 5e-4               # learning rate decay by epoch
+    DECAY      = 5e-2               # learning rate decay by epoch
     N_EPOCHS   = 500                # number of epochs to train model for
-    BATCH_SIZE = 8                  # batch size
+    BATCH_SIZE = 16                 # batch size
     LOG_FREQ   = 10                 # how often (epochs) to log train/val statistics
     SAVE_FREQ  = N_EPOCHS // 5      # how often (epochs) to save the intermediate weights             
 
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     val_imgs    = glob.glob('./val/images/*.png')
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "6"  # choose which GPU to run on.
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # choose which GPU to run on.
     
     ##########################################################
     ##########################################################

@@ -15,6 +15,8 @@ import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.callbacks import TensorBoard
 
+from tensorflow.keras.losses import categorical_crossentropy
+
 # Hacky relative import to ../ directory to use palette conversion utils.
 import os
 import sys
@@ -55,12 +57,12 @@ class SegModelBase(ABC):
             # Both intersection and union tensors have shape batch x channels.
             intersection = tf.reduce_sum(y_true_mask * y_pred_mask, sum_axes)
             union = tf.reduce_sum(tf.clip_by_value(y_true_mask + y_pred_mask, 0, 1), sum_axes)
-            return tf.reduce_mean((intersection) / (union + epsilon)) # mean over batch and channels
+            return tf.reduce_mean((intersection + epsilon) / (union + epsilon)) # mean over batch and channels
 
         return metric
 
     @staticmethod
-    def _soft_dice_loss(epsilon=1e-10):
+    def _soft_dice_loss(epsilon=1e-10, cross_entropy_weight=0.0):
         """ Soft Dice Loss based on https://www.jeremyjordan.me/semantic-segmentation/#loss.
         Loss function reference: https://towardsdatascience.com/advanced-keras-constructing-complex-custom-losses-and-metrics-c07ca130a618
         """
@@ -71,9 +73,34 @@ class SegModelBase(ABC):
             num = 2. * tf.reduce_sum(y_pred * y_true, sum_axes)  # batch x channels
             den = tf.reduce_sum(tf.square(y_pred) + tf.square(y_true), sum_axes)  # batch x channels
 
-            return 1 - tf.reduce_mean((num) / (den + epsilon))  # mean over batch and channels
+            dice_loss = 1 - tf.reduce_mean((num + epsilon) / (den + epsilon))  # mean over batch and channels
+            if cross_entropy_weight > 0.0:
+                dice_loss += cross_entropy_weight * tf.reduce_mean(categorical_crossentropy(y_true, y_pred))
+            return dice_loss
 
         return loss
+
+    @staticmethod
+    def _calc_cyclic_val(epoch, min_val, max_val, period, flip=False):
+        # triangular function of epoch oscillating from min_val to max_val
+        # flip = True  => start from min_val at beginning of period
+        # flip = False => start from max_val at beginning of period
+        epoch_mod = epoch % period
+        half_period = period / 2.
+        slope = (max_val - min_val) / half_period
+        if epoch_mod < half_period:
+            val = min_val + slope * epoch_mod
+        else:
+            val = max_val - slope * (epoch_mod - half_period)
+    
+        if flip:
+            val = max_val - val + min_val
+        return val
+        # To use this for cyclic learning rate and momentum:
+        # next_lr       = SegModelBase._calc_cyclic_val(epoch=epoch+1, min_val=init_lr/10., max_val=init_lr, period=10.)
+        # next_momentum = SegModelBase._calc_cyclic_val(epoch=epoch+1, min_val=0.8, max_val=0.9, period=10., flip=True)
+        # K.set_value(self._model.optimizer.lr, next_lr)
+        # K.set_value(self._model.optimizer.momentum, next_momentum)
 
     def fit_model(self,
                   train_image_list,
@@ -121,7 +148,7 @@ class SegModelBase(ABC):
         val_dataset = tf.data.Dataset.from_tensor_slices(val_img_list)
         val_dataset = val_dataset.map(parse_function)
         val_dataset = val_dataset.map(tf_val_augment_function)
-        val_dataset = val_dataset.batch(2) # smaller since we use full image resolution here
+        val_dataset = val_dataset.batch(2) # batch size not critical here
         #val_dataset = val_dataset.prefetch(buffer_size=2*batch_size)
 
         init_lr = K.get_value(self._model.optimizer.lr)

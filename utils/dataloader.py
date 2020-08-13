@@ -5,7 +5,8 @@ import glob
 from functools import partial
 import numpy as np
 import tensorflow as tf
-import imgaug.augmenters as iaa
+import tensorflow_addons as tfa
+#import imgaug.augmenters as iaa
 import pdb
 
 def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
@@ -54,30 +55,35 @@ def tf_train_function(instance_dict):
 
     sample_rvs = tf.random.uniform(shape=[4])
 
-    # Step 1: Randomly crop to a 224 by 224 subimage or leave at full resolution
+    # # Step 1: Randomly crop a 224 x 224 subimage, either from 0.75-scale or 0.5-scale.
+    # # Known issue with downward resizing, since pixel labels for thin objects (e.g. poles)
+    # # can be incomplete due to nearest neighbor approach.
+    # image_height, image_width, _ = image_train.shape
+    # if sample_rvs[0] > 0.5:
+    #     scale_factor = 0.75
+    # else:
+    #     scale_factor = 0.5
+    # target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
+    # image_train = tf.image.resize(image_train, target_size, method='bilinear')
+    # label_train = tf.image.resize(label_train, target_size, method='nearest')            
+
+    # image_height, image_width = target_size
+    # offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
+    # offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
+
+    # offset_rvs = tf.random.uniform(shape=[2])    
+    # offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
+    # offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
+    # image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 224)
+    # label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
+
+    # Step 1: Randomly pick a (448, 448) crop to predict on.
     image_height, image_width, _ = image_train.shape
-    if sample_rvs[0] > 0.7:
-        scale_factor = 1.5
-        target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
-        image_train = tf.image.resize(image_train, target_size, method='bilinear')
-        label_train = tf.image.resize(label_train, target_size, method='nearest')
-    elif sample_rvs[1] > 0.4:
-        scale_factor = 0.75
-        target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
-        image_train = tf.image.resize(image_train, target_size, method='bilinear')
-        label_train = tf.image.resize(label_train, target_size, method='nearest')
-    else:
-        target_size = (int(image_height), int(image_width))
-
-    image_height, image_width = target_size
-    offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
-    offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
-
-    offset_rvs = tf.random.uniform(shape=[2])    
-    offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
-    offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
-    image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 224)
-    label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
+    offset_width_max  = tf.cast(image_width  - 448, dtype=tf.float32)
+    offset_height = tf.constant(0, dtype=tf.int32)
+    offset_width  = tf.cast(sample_rvs[0] * offset_width_max, dtype=tf.int32) 
+    image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 448, 448)
+    label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 448, 448)
 
     # Step 2: Randomly flip left/right
     if sample_rvs[1] > 0.4:
@@ -98,6 +104,12 @@ def tf_train_function(instance_dict):
                     image_train = tf.image.random_contrast(image_train, 0.5, 2.0)   # randomly scales deviation from mean
                 else:
                     image_train = tf.image.random_saturation(image_train, 0.5, 2.0) # randomly scale saturation in HSV space
+    
+    # Step 4: Randomly apply 10% pixel level dropout.
+    if sample_rvs[3] > 0.4:
+        mask = tf.cast( tf.random.uniform(shape=[448, 448]) > 0.1, tf.float32)
+        mask_3 = tf.stack((mask,mask,mask), axis=-1)
+        image_train = image_train * mask_3
 
     image_train = tf.image.convert_image_dtype(image_train, dtype=tf.uint8, saturate=True)
     label_train = tf.image.convert_image_dtype(label_train, dtype=tf.uint8, saturate=True)
@@ -106,24 +118,35 @@ def tf_train_function(instance_dict):
 
 def tf_val_function(instance_dict):
     # Sample a 224 by 224 crop for validation.  Helps with memory issues.
-    image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
-    label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
+    # image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
+    # label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
 
-    image_height, image_width, _ = image_val.shape
+    # image_height, image_width, _ = image_val.shape
+    
+    # # We also apply the random downscaling here so only "geometric" transformations applied.
+    # if tf.random.uniform(shape=[]) > 0.5:
+    #     target_size = (int(image_height), int(image_width))
+    # else:
+    #     scale_factor = 0.5
+    #     target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
+    #     image_train = tf.image.resize(image_val, target_size, method='bilinear')
+    #     label_train = tf.image.resize(label_val, target_size, method='nearest')
 
-    offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
-    offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
 
-    offset_rvs = tf.random.uniform(shape=[2])    
-    offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
-    offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
-    image_val     = tf.image.crop_to_bounding_box(image_val, offset_height, offset_width, 224, 224)
-    label_val     = tf.image.crop_to_bounding_box(label_val, offset_height, offset_width, 224, 224)
+    # offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
+    # offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
 
-    image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
-    label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=True)
+    # offset_rvs = tf.random.uniform(shape=[2])    
+    # offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
+    # offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
+    # image_val     = tf.image.crop_to_bounding_box(image_val, offset_height, offset_width, 224, 224)
+    # label_val     = tf.image.crop_to_bounding_box(label_val, offset_height, offset_width, 224, 224)
 
-    return image_val, label_val
+    # image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
+    # label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=True)
+
+    # return image_val, label_val
+    return instance_dict['image'], instance_dict['label']
 
 if __name__ == '__main__':
     import os
