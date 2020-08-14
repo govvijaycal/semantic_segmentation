@@ -26,8 +26,8 @@ if __name__ == '__main__':
     TRAIN_DIR = '/shared/govvijay/cityscapes/leftImg8bit/train/'
     VAL_DIR   = '/shared/govvijay/cityscapes/leftImg8bit/val/'
     
-    train_imgs = np.array(glob.glob(TRAIN_DIR + '*/*.png'))
-    val_imgs   = np.array(glob.glob(VAL_DIR + '*/*.png'))
+    train_imgs = glob.glob(TRAIN_DIR + '*/*.png')
+    val_imgs   = glob.glob(VAL_DIR + '*/*.png')
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # choose which GPU to run on.

@@ -116,7 +116,7 @@ class FPNModel(SegModelBase):
         seg1 = Conv2D(128, (3,3), padding='same', activation='relu', name='Seg/conv33_seg1')(seg1)
         seg1 = GroupNormalization(groups=4, name='Seg/GN_seg1')(seg1)
                 
-        out = Conv2D(13, (1, 1), padding='same', name='Seg/conv11_final')(seg1 + seg2 + seg3 + seg4)        
+        out = Conv2D(self._num_classes, (1, 1), padding='same', name='Seg/conv11_final')(seg1 + seg2 + seg3 + seg4)        
         out = UpSampling2D((4, 4), interpolation='bilinear', name='Seg/up44_final')(out)
         out = Softmax(name='Seg/softmax_final')(out)
 
