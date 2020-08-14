@@ -49,6 +49,50 @@ def parse_image(img_path, num_seg_classes=13, crop_bbox=None):
 
     return {'image': image, 'label': mask, 'name': name}
 
+def parse_image_cityscapes(img_path):
+    """ Similar to parse_image but specialized for Cityscapes """
+
+    #### Mask IDS
+    # Note: ids 0 - 18 are valid classes to predict for (so 19 default training classes).
+    # We choose to group all "ignore" or "background" pixels into a trainID 19 (so we use 20 total training classes).
+    num_seg_classes_with_background = 20
+    background_final_label = tf.constant(num_seg_classes_with_background - 1, dtype=tf.int32)
+
+    ### Assumed form of img_path and directory structure.
+    # We assume that img_path is of the form leftImg8bit/x/y/y_z_w_leftImg8bit.png 
+    # so that the mask path is of the form   gtFine/x/y/y_z_w_gtFine_labelTrainIds.png
+    # e.g. leftImg8bit/train/aachen/aachen_000000_000019_leftImg8bit.png
+    #      gtFine/train/aachen/aachen_000000_000019_gtFine_labelTrainIds.png
+
+    name = tf.strings.split(img_path, sep='/')[-1]
+    image = tf.io.read_file(img_path)
+    image = tf.image.decode_png(image, channels=3)
+    image = tf.image.convert_image_dtype(image, tf.float32)
+    
+    # img_shape = tf.shape(image)
+    # image_height = img_shape[0]
+    # image_width  = img_shape[1]
+    # target_size = (image_height / 2, image_width / 2)
+    target_size = (int(448), int(896))
+    image = tf.image.resize(image, target_size, method='bilinear') # downsample  to [448, 896, 3]
+    image = tf.image.convert_image_dtype(image, dtype=tf.uint8, saturate=True)
+    
+    mask_path = tf.strings.regex_replace(img_path, "leftImg8bit", "gtFine") # assumed directory structure
+    mask_path = tf.strings.regex_replace(mask_path, ".png", "_labelTrainIds.png")
+    mask = tf.io.read_file(mask_path)
+    mask = tf.image.decode_png(mask, channels=1)
+    mask = tf.image.convert_image_dtype(mask, tf.uint8)
+
+    mask = tf.image.resize(mask, target_size, method='nearest') # downsample by 2x to [448, 896, 1]      
+
+    # Hack to convert label value 255 -> background_final_label = 19
+    mask = tf.cast(mask, tf.int32)
+    mask = tf.minimum(mask, background_final_label)                 
+
+    mask = tf.one_hot(tf.squeeze(mask), num_seg_classes_with_background, dtype=tf.uint8) # H x W -> H x W x channels
+
+    return {'image': image, 'label': mask, 'name': name}
+
 def tf_train_function(instance_dict):
     image_train = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
     label_train = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
@@ -78,7 +122,11 @@ def tf_train_function(instance_dict):
     # label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
 
     # Step 1: Randomly pick a (448, 448) crop to predict on.
-    image_height, image_width, _ = image_train.shape
+    #image_height, image_width, _ = image_train.shape
+    img_shape = tf.shape(image_train)
+    image_height = img_shape[0]
+    image_width  = img_shape[1]
+
     offset_width_max  = tf.cast(image_width  - 448, dtype=tf.float32)
     offset_height = tf.constant(0, dtype=tf.int32)
     offset_width  = tf.cast(sample_rvs[0] * offset_width_max, dtype=tf.int32) 
@@ -157,23 +205,32 @@ if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
 
-    TRAIN_DIR = './train/'
-    VAL_DIR = './val/'
-
+    MODE = 'cityscapes' # 'cityscapes' or 'carla'
+    
     np.random.seed(0)
-    train_imgs = np.array(glob.glob(TRAIN_DIR + 'images/*.png'))
-    val_imgs = np.array(glob.glob(VAL_DIR + 'images/*.png'))
-    np.random.shuffle(train_imgs)
-    np.random.shuffle(val_imgs)
+    if MODE == 'carla':
+        TRAIN_DIR = './train/'
+        VAL_DIR = './val/'
 
-    parse_function = partial(parse_image, num_seg_classes=13, crop_bbox=[0, 0, 448, 800])
+        train_imgs = np.array(glob.glob(TRAIN_DIR + 'images/*.png'))
+        val_imgs = np.array(glob.glob(VAL_DIR + 'images/*.png'))
+
+        parse_function = partial(parse_image, num_seg_classes=13, crop_bbox=[0, 0, 448, 800])
+    elif MODE == 'cityscapes':
+        TRAIN_DIR = '/shared/govvijay/cityscapes/leftImg8bit/train/'
+        VAL_DIR   = '/shared/govvijay/cityscapes/leftImg8bit/val/'
+        
+        train_imgs = np.array(glob.glob(TRAIN_DIR + '*/*.png'))
+        val_imgs   = np.array(glob.glob(VAL_DIR + '*/*.png'))
+
+        parse_function = parse_image_cityscapes
 
     train_dataset = tf.data.Dataset.from_tensor_slices(train_imgs)
     train_dataset = train_dataset.shuffle(5, reshuffle_each_iteration=True)
     train_dataset = train_dataset.map(parse_function)
     train_dataset = train_dataset.map(tf_train_function)
-    train_dataset = train_dataset.batch(16)
-    train_dataset = train_dataset.prefetch(buffer_size=32)
+    train_dataset = train_dataset.batch(8)
+    #train_dataset = train_dataset.prefetch(buffer_size=32)
 
     run_viz = True
 
