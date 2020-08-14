@@ -225,7 +225,7 @@ class SegModelBase(ABC):
         img = img_raw.astype(np.float32) / 127.5 - 1.0
         return np.squeeze(self._model.predict(img))  # remove batch dimension
 
-    def predict_folder(self, image_dir, res_dir, apply_color_palette=True, crop_bbox=None, resize_shape=None):
+    def predict_folder(self, image_dir, res_dir, color_palette=None, crop_bbox=None, resize_shape=None):
         """ Prediction applied to a full image_dir and then saved in res_dir.
         This function simply runs predictions on all images in image_dir and saves to res_dir.
         The argmax is taken, so the results are a grayscale image and not the full softmax output.
@@ -235,15 +235,15 @@ class SegModelBase(ABC):
         Args:
             image_dir: location with images to make predictions on
             res_dir: location to save prediction result images             
-            apply_color_palette: convert label values with a color palette (CARLA)
+            color_palette: convert label values with this color palette (see utils/apply_color_palette.py)
             crop_bbox: None or [x_min, y_min, x_max, y_max].
             resize_shape: None or [width, height]
         """
         
         os.makedirs(res_dir, exist_ok=True)
 
-        img_list = glob.glob(image_dir + '*.png')
-        img_list.extend(glob.glob(image_dir + '*.jpg')) # both png/jpg supported
+        img_list = glob.glob(image_dir + '**/*.png', recursive=True)
+        img_list.extend(glob.glob(image_dir + '**/*.jpg', recursive=True)) # both png/jpg supported
 
         print('Predicting from folder:')
         for imagepath in img_list:
@@ -257,15 +257,15 @@ class SegModelBase(ABC):
             img_raw = np.array(img_raw)
 
             seg_pred = self.predict_instance(img_raw)
-            savepath = imagepath.replace(image_dir, res_dir)
+            savepath = res_dir + imagepath.split('/')[-1]
 
             print('  imagepath: ', imagepath)
             print('  savepath: ', savepath)
 
             label_img = np.argmax(seg_pred, axis=-1).astype(np.uint8)
 
-            if apply_color_palette:
-                pal_img = convert_label_to_palette_img(label_img)
+            if color_palette:
+                pal_img = convert_label_to_palette_img(label_img, color_palette)
                 Image.fromarray(pal_img).save(savepath)
             else:
                 Image.fromarray(label_img).save(savepath)

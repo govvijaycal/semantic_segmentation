@@ -7,6 +7,8 @@ from utils import dataloader
 from models.fpn_model import FPNModel
 from models.unet_model import UNetModel
 
+from utils.apply_color_palette import CARLA_LABEL_COLORS
+
 if __name__ == '__main__':
     ##########################################################
     ################## ADJUSTABLE PARAMS #####################
@@ -28,12 +30,11 @@ if __name__ == '__main__':
     
     ##########################################################
     ##########################################################
-    model = eval("%s(backbone='%s', num_classes=%d)" % (NETWORK, BACKBONE, N_CLASS))
-    parse_fun = partial(dataloader.parse_image, num_seg_classes=N_CLASS, crop_bbox=CROP_BBOX)
+    model = eval("%s(backbone='%s', num_classes=%d)" % (NETWORK, BACKBONE, N_CLASS))    
 
     model.load_weights(WEIGHTS)
     model.predict_folder(IMAGE_DIR,
                          RES_DIR,
-                         apply_color_palette=APPLY_COLOR,
+                         color_palette=CARLA_LABEL_COLORS,
                          crop_bbox=CROP_BBOX_PIL, 
                          resize_shape=None)
