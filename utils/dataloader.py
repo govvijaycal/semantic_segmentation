@@ -99,39 +99,17 @@ def tf_train_function(instance_dict):
 
     sample_rvs = tf.random.uniform(shape=[4])
 
-    # # Step 1: Randomly crop a 224 x 224 subimage, either from 0.75-scale or 0.5-scale.
-    # # Known issue with downward resizing, since pixel labels for thin objects (e.g. poles)
-    # # can be incomplete due to nearest neighbor approach.
-    # image_height, image_width, _ = image_train.shape
-    # if sample_rvs[0] > 0.5:
-    #     scale_factor = 0.75
-    # else:
-    #     scale_factor = 0.5
-    # target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
-    # image_train = tf.image.resize(image_train, target_size, method='bilinear')
-    # label_train = tf.image.resize(label_train, target_size, method='nearest')            
+    # Step 1: For all images, resize to (224, 224).  This is not ideal as there will be
+    # label noise for thin objects only resolvable at higher resolutions, but is okay
+    # for essentially lane/driveable area estimation focus.  Also, this will make the 
+    # trained model not robust to multi-scale/varying pixel resolution.
+    image_train = tf.image.resize(image_train, (224,224), method='bilinear')
+    label_train = tf.image.resize(label_train, (224,224), method='nearest')    
 
-    # image_height, image_width = target_size
-    # offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
-    # offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
-
-    # offset_rvs = tf.random.uniform(shape=[2])    
-    # offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
-    # offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
-    # image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 224)
-    # label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 224)
-
-    # Step 1: Randomly pick a (448, 448) crop to predict on.
-    #image_height, image_width, _ = image_train.shape
     img_shape = tf.shape(image_train)
-    image_height = img_shape[0]
-    image_width  = img_shape[1]
+    image_height = tf.cast(img_shape[0], dtype=tf.float32)
+    image_width  = tf.cast(img_shape[1], dtype=tf.float32)
 
-    offset_width_max  = tf.cast(image_width  - 448, dtype=tf.float32)
-    offset_height = tf.constant(0, dtype=tf.int32)
-    offset_width  = tf.cast(sample_rvs[0] * offset_width_max, dtype=tf.int32) 
-    image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 448, 448)
-    label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 448, 448)
 
     # Step 2: Randomly flip left/right
     if sample_rvs[1] > 0.4:
@@ -153,11 +131,16 @@ def tf_train_function(instance_dict):
                 else:
                     image_train = tf.image.random_saturation(image_train, 0.5, 2.0) # randomly scale saturation in HSV space
     
-    # Step 4: Randomly apply 10% pixel level dropout.
+    # Step 4: Randomly dropout a 20 x 20 patch (cutout) (< 1% of full image) to mimic occlusions/shadows.
     if sample_rvs[3] > 0.4:
-        mask = tf.cast( tf.random.uniform(shape=[448, 448]) > 0.1, tf.float32)
-        mask_3 = tf.stack((mask,mask,mask), axis=-1)
-        image_train = image_train * mask_3
+        image_train = tf.expand_dims(image_train, axis=0)
+        image_train = tfa.image.random_cutout(image_train, mask_size=(20,20), constant_values=0)
+        image_train = tf.squeeze(image_train)
+
+        # Note: Pixel dropout of 10% not used, left for reference.
+        # mask = tf.cast( tf.random.uniform(shape=[image_height, image_width]) > 0.1, tf.float32)
+        # mask_3 = tf.stack((mask,mask,mask), axis=-1)
+        # image_train = image_train * mask_3
 
     image_train = tf.image.convert_image_dtype(image_train, dtype=tf.uint8, saturate=True)
     label_train = tf.image.convert_image_dtype(label_train, dtype=tf.uint8, saturate=True)
@@ -165,36 +148,13 @@ def tf_train_function(instance_dict):
     return image_train, label_train
 
 def tf_val_function(instance_dict):
-    # Sample a 224 by 224 crop for validation.  Helps with memory issues.
-    # image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
-    # label_val = tf.image.convert_image_dtype(instance_dict['label'], dtype=tf.float32)
-
-    # image_height, image_width, _ = image_val.shape
+    image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
+    image_val = tf.image.resize(image_val, (224,224), method='bilinear')
+    image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
     
-    # # We also apply the random downscaling here so only "geometric" transformations applied.
-    # if tf.random.uniform(shape=[]) > 0.5:
-    #     target_size = (int(image_height), int(image_width))
-    # else:
-    #     scale_factor = 0.5
-    #     target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
-    #     image_train = tf.image.resize(image_val, target_size, method='bilinear')
-    #     label_train = tf.image.resize(label_val, target_size, method='nearest')
-
-
-    # offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
-    # offset_width_max  = tf.cast(image_width  - 224, dtype=tf.float32)
-
-    # offset_rvs = tf.random.uniform(shape=[2])    
-    # offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32) 
-    # offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32) 
-    # image_val     = tf.image.crop_to_bounding_box(image_val, offset_height, offset_width, 224, 224)
-    # label_val     = tf.image.crop_to_bounding_box(label_val, offset_height, offset_width, 224, 224)
-
-    # image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
-    # label_val = tf.image.convert_image_dtype(label_val, dtype=tf.uint8, saturate=True)
-
-    # return image_val, label_val
-    return instance_dict['image'], instance_dict['label']
+    label_val = tf.image.resize(instance_dict['label'], (224,224), method='nearest') 
+    
+    return image_val, label_val
 
 if __name__ == '__main__':
     import os
@@ -205,7 +165,7 @@ if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
 
-    MODE = 'cityscapes' # 'cityscapes' or 'carla'
+    MODE = 'carla' # 'cityscapes' or 'carla'
     
     np.random.seed(0)
     if MODE == 'carla':
@@ -228,7 +188,7 @@ if __name__ == '__main__':
     train_dataset = tf.data.Dataset.from_tensor_slices(train_imgs)
     train_dataset = train_dataset.shuffle(5, reshuffle_each_iteration=True)
     train_dataset = train_dataset.map(parse_function)
-    train_dataset = train_dataset.map(tf_train_function)
+    train_dataset = train_dataset.map(tf_val_function)
     train_dataset = train_dataset.batch(8)
     #train_dataset = train_dataset.prefetch(buffer_size=32)
 
