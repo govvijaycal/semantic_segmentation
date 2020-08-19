@@ -124,7 +124,7 @@ class FPNModel(SegModelBase):
 
         fpn_model.compile(
             optimizer=SGD(lr=self._init_lr, momentum=0.9, nesterov=True, clipnorm=10.),
-            loss=FPNModel._soft_dice_loss(),
+            loss=FPNModel._soft_dice_loss(cross_entropy_weight=0.01),
             metrics=[FPNModel._mean_intersection_over_union()]
         )
         
