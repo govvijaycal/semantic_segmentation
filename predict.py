@@ -14,10 +14,10 @@ if __name__ == '__main__':
     ################## ADJUSTABLE PARAMS #####################
     ##########################################################
     NETWORK   = 'FPNModel'         # FPNModel, UNetModel
-    BACKBONE  = 'ResNet50'      # MobileNetv2, ResNet50
+    BACKBONE  = 'MobileNetV2'      # MobileNetV2, ResNet50
     N_CLASS   = 13                 # number of segmentation classes
     
-    WEIGHTS     = './log/carla_resnet_1/seg_pred_00100_epochs'
+    WEIGHTS     = './log/ms_carla_fpn_mnet_step_up22/seg_pred_00500_epochs'
     IMAGE_DIR   = './val/images/'
     RES_DIR     = './val/preds_test/'
     APPLY_COLOR = True
@@ -37,4 +37,4 @@ if __name__ == '__main__':
                          RES_DIR,
                          color_palette=CARLA_LABEL_COLORS,
                          crop_bbox=CROP_BBOX_PIL, 
-                         resize_shape=None)
+                         resize_shape=[416,224])

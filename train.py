@@ -11,13 +11,15 @@ if __name__ == '__main__':
     ##########################################################
     ################## ADJUSTABLE PARAMS #####################
     ##########################################################
-    NETWORK   = 'FPNModel'                         # FPNModel, UNetModel
-    BACKBONE  = 'ResNet50'                         # MobileNetv2, ResNet50
-    LOGDIR    = './log/carla_fpn_resnet_1/' # where to save tensorboard logging and model weights
-    N_CLASS   = 13                                 # number of segmentation classes
+    NETWORK   = 'FPNModel'                # FPNModel, UNetModel
+    BACKBONE  = 'ResNet50'                # MobileNetV2, ResNet50
+    LOGDIR    = './log/ms_carla_fpn_resnet_step_up22/' # where to save tensorboard logging and model weights
+    N_CLASS   = 13                               # number of segmentation classes
     
-    INIT_LR    = 5e-2               # initial learning rate
-    DECAY      = 5e-2               # learning rate decay by epoch
+    INIT_LR    = 1e-2               # initial learning rate
+    DECAY      = 0.0                # learning rate decay by epoch
+    LR_STEP    = [200, 400]         # epochs at which to change learning rate by LR_FACTOR
+    LR_FACTOR  = 0.2                # multiplier to learning rate applied after passing an epoch in LR_STEP
     N_EPOCHS   = 500                # number of epochs to train model for
     BATCH_SIZE = 16                 # batch size
     LOG_FREQ   = 10                 # how often (epochs) to log train/val statistics
@@ -33,8 +35,8 @@ if __name__ == '__main__':
     
     ##########################################################
     ##########################################################
-    model = eval("%s(backbone='%s', num_classes=%d, init_lr=%f, decay=%f)" %
-        (NETWORK, BACKBONE, N_CLASS, INIT_LR, DECAY))
+    model = eval("%s(backbone='%s', num_classes=%d, init_lr=%f, decay=%f, lr_step=%s, lr_factor=%f)" %
+        (NETWORK, BACKBONE, N_CLASS, INIT_LR, DECAY, LR_STEP, LR_FACTOR))
     parse_fun = partial(dataloader.parse_image, num_seg_classes=N_CLASS, crop_bbox=CROP_BBOX)
     
     model.fit_model(train_imgs,
