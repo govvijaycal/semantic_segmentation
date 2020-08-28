@@ -99,17 +99,44 @@ def tf_train_function(instance_dict):
 
     sample_rvs = tf.random.uniform(shape=[4])
 
-    # Step 1: For all images, resize to (224, 224).  This is not ideal as there will be
-    # label noise for thin objects only resolvable at higher resolutions, but is okay
-    # for essentially lane/driveable area estimation focus.  Also, this will make the 
-    # trained model not robust to multi-scale/varying pixel resolution.
-    image_train = tf.image.resize(image_train, (224,224), method='bilinear')
-    label_train = tf.image.resize(label_train, (224,224), method='nearest')    
+    # # Step 1: For all images, resize to (224, 224).  This is not ideal as there will be
+    # # label noise for thin objects only resolvable at higher resolutions, but is okay
+    # # for essentially lane/driveable area estimation focus.  Also, this will make the 
+    # # trained model not robust to multi-scale/varying pixel resolution.
+    # image_train = tf.image.resize(image_train, (224,416), method='bilinear')
+    # label_train = tf.image.resize(label_train, (224,416), method='nearest')    
 
     img_shape = tf.shape(image_train)
     image_height = tf.cast(img_shape[0], dtype=tf.float32)
     image_width  = tf.cast(img_shape[1], dtype=tf.float32)
 
+    if sample_rvs[0] > 0.4:
+        # Simple scale down to (224, 416).
+        image_train = tf.image.resize(image_train, (224,416), method='bicubic')
+        label_train = tf.image.resize(label_train, (224,416), method='nearest')         
+    else:
+        # Scale randomly and then crop a (224, 416) shape at that resolution.
+        scale_rv = tf.random.uniform(shape=[1])
+        if scale_rv[0] < 0.3:
+            scale_factor = 0.6
+        elif scale_rv[0] < 0.6:
+            scale_factor = 1.4
+        else:
+            scale_factor = 1.0
+
+        target_size = (int(scale_factor*image_height), int(scale_factor*image_width))
+        image_train = tf.image.resize(image_train, target_size, method='bicubic')
+        label_train = tf.image.resize(label_train, target_size, method='nearest')
+
+        image_height, image_width = target_size
+        offset_height_max = tf.cast(image_height - 224, dtype=tf.float32) 
+        offset_width_max  = tf.cast(image_width  - 416, dtype=tf.float32)
+
+        offset_rvs = tf.random.uniform(shape=[2])
+        offset_height = tf.cast(offset_rvs[0] * offset_height_max, dtype=tf.int32)
+        offset_width  = tf.cast(offset_rvs[1] * offset_width_max, dtype=tf.int32)
+        image_train   = tf.image.crop_to_bounding_box(image_train, offset_height, offset_width, 224, 416)
+        label_train   = tf.image.crop_to_bounding_box(label_train, offset_height, offset_width, 224, 416)
 
     # Step 2: Randomly flip left/right
     if sample_rvs[1] > 0.4:
@@ -149,10 +176,10 @@ def tf_train_function(instance_dict):
 
 def tf_val_function(instance_dict):
     image_val = tf.image.convert_image_dtype(instance_dict['image'], dtype=tf.float32)
-    image_val = tf.image.resize(image_val, (224,224), method='bilinear')
+    image_val = tf.image.resize(image_val, (224,416), method='bicubic')
     image_val = tf.image.convert_image_dtype(image_val, dtype=tf.uint8, saturate=True)
     
-    label_val = tf.image.resize(instance_dict['label'], (224,224), method='nearest') 
+    label_val = tf.image.resize(instance_dict['label'], (224,416), method='nearest') 
     
     return image_val, label_val
 
@@ -188,7 +215,7 @@ if __name__ == '__main__':
     train_dataset = tf.data.Dataset.from_tensor_slices(train_imgs)
     train_dataset = train_dataset.shuffle(5, reshuffle_each_iteration=True)
     train_dataset = train_dataset.map(parse_function)
-    train_dataset = train_dataset.map(tf_val_function)
+    train_dataset = train_dataset.map(tf_train_function)
     train_dataset = train_dataset.batch(8)
     #train_dataset = train_dataset.prefetch(buffer_size=32)
 

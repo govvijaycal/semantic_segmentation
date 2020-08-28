@@ -19,7 +19,7 @@ from seg_model_base import SegModelBase
 
 class PSPNetModel(SegModelBase):
 
-    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4):
+    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4, lr_step=[], lr_factor=0.0):
         """ Constructor with adjustable base pretrained CNN model and segmentation target size.
 
         Args:
@@ -33,6 +33,16 @@ class PSPNetModel(SegModelBase):
                 pass
             else:
                 setattr(self, '_%s' % key, locals()[key])
+
+        if decay > 0.0 and len(lr_step) == 0:
+            print('Using learning rate decay at epoch rate: %.3f' % decay)
+            self._lr_mode = 'decay'
+        elif len(lr_step) > 0 and lr_factor > 0.0:
+            assert lr_factor < 1.0, "lr_factor should be in (0.0, 1.0)"
+            print('Using learning rate schedule with drops at %s with factor %.3f' % (lr_step, lr_factor))
+            self._lr_mode = 'step'
+        else:
+            raise ValueError("Did not specify a valid learning rate schedule")
 
         # Based on backbone selection, pick out 4 feature maps used in the UNet architecture.
         if self._backbone == 'MobileNetV2':
@@ -98,7 +108,7 @@ class PSPNetModel(SegModelBase):
 
         pspnet_model.compile(
             optimizer=SGD(lr=self._init_lr, momentum=0.9, nesterov=True, clipnorm=10.),
-            loss=PSPNetModel._soft_dice_loss(),
+            loss=PSPNetModel._soft_dice_loss(cross_entropy_weight=0.1),
             metrics=[PSPNetModel._mean_intersection_over_union()]
         )
         

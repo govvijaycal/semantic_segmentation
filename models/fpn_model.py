@@ -18,7 +18,7 @@ from seg_model_base import SegModelBase
 
 class FPNModel(SegModelBase):
 
-    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4):
+    def __init__(self, backbone='ResNet50', num_classes=13, init_lr=5e-2, decay=5e-4, lr_step=[], lr_factor=0.0):
         """ Constructor with adjustable base pretrained CNN model and segmentation target size.
 
         Args:
@@ -32,6 +32,16 @@ class FPNModel(SegModelBase):
                 pass
             else:
                 setattr(self, '_%s' % key, locals()[key])
+
+        if decay > 0.0 and len(lr_step) == 0:
+            print('Using learning rate decay at epoch rate: %.3f' % decay)
+            self._lr_mode = 'decay'
+        elif len(lr_step) > 0 and lr_factor > 0.0:
+            assert lr_factor < 1.0, "lr_factor should be in (0.0, 1.0)"
+            print('Using learning rate schedule with drops at %s with factor %.3f' % (lr_step, lr_factor))
+            self._lr_mode = 'step'
+        else:
+            raise ValueError("Did not specify a valid learning rate schedule")
 
         # Based on backbone selection, pick out 5 feature maps to use in the FPN.
         # Like in the Panoptic FPN paper, we drop the 1/2 resolution.
@@ -75,7 +85,7 @@ class FPNModel(SegModelBase):
                                    pooling=None)
 
         for layer in base_model.layers:
-            layer._name = self._backbone + '/' + layer.name
+            layer._name = self._backbone + '/' + layer.name            
             layer.trainable = False
         fmaps = [base_model.get_layer(self._backbone + '/' + fmap_name).output for fmap_name in self._feature_map_list]
 
@@ -117,14 +127,19 @@ class FPNModel(SegModelBase):
         seg1 = GroupNormalization(groups=4, name='Seg/GN_seg1')(seg1)
                 
         out = Conv2D(self._num_classes, (1, 1), padding='same', name='Seg/conv11_final')(seg1 + seg2 + seg3 + seg4)        
-        out = UpSampling2D((4, 4), interpolation='bilinear', name='Seg/up44_final')(out)
+
+        # out = UpSampling2D((4, 4), interpolation='bilinear', name='Seg/up44_final')(out)
+        out = UpSampling2D((2, 2), interpolation='bilinear', name='Seg/up22_fina11')(out)
+        out = Conv2D(self._num_classes, (3,3), padding='same', name='Seg/conv33_final1')(out)
+        out = UpSampling2D((2, 2), interpolation='bilinear', name='Seg/up22_fina12')(out)        
+        
         out = Softmax(name='Seg/softmax_final')(out)
 
         fpn_model = Model(inputs=base_model.input, outputs=out, name='fpn_model')
 
         fpn_model.compile(
             optimizer=SGD(lr=self._init_lr, momentum=0.9, nesterov=True, clipnorm=10.),
-            loss=FPNModel._soft_dice_loss(cross_entropy_weight=0.01),
+            loss=FPNModel._soft_dice_loss(cross_entropy_weight=0.1),
             metrics=[FPNModel._mean_intersection_over_union()]
         )
         

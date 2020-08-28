@@ -170,7 +170,15 @@ class SegModelBase(ABC):
             epoch_miou = np.mean(mious)
             print('\tTrain loop done at %s' % datetime.now())
 
-            next_lr = init_lr / (1 + self._decay * epoch)
+            if self._lr_mode == 'decay':
+                next_lr = init_lr / (1 + self._decay * epoch)    
+            elif self._lr_mode == 'step':
+                num_drops = np.searchsorted(self._lr_step, epoch, side='right')
+                lr_multiple = self._lr_factor ** num_drops
+                next_lr = init_lr * lr_multiple
+            else:
+                raise ValueError("Learning rate schedule not specified.")
+
             K.set_value(self._model.optimizer.lr, next_lr)
 
             if log_epoch_freq and epoch % log_epoch_freq == 0:
@@ -201,6 +209,42 @@ class SegModelBase(ABC):
 
         tensorboard.on_train_end(None)
         self._trained = True
+
+    def evaluate_model(self,
+                       val_img_list,
+                       parse_function=None,
+                       tf_val_augment_function=None):
+        """ Evaluate model on the validation set.
+
+        Args:
+            val_img_list: List of validation images to load and augment.
+            parse_function: Function to load image/segmentation mask pairs.
+            tf_val_augment_function: Augmentation function used for validation.
+            batch_size: Batch size used for training.
+        """
+
+        if parse_function is None:
+            raise ValueError("Require parse_function for dataset image/label loading.")
+        if tf_val_augment_function is None:
+            raise ValueError("Require val_augment_function.  "
+                             "Can provide an identity lambda function for no augmentation.")
+        
+        val_dataset = tf.data.Dataset.from_tensor_slices(val_img_list)
+        val_dataset = val_dataset.map(parse_function)
+        val_dataset = val_dataset.map(tf_val_augment_function)
+        val_dataset = val_dataset.batch(2) # batch size not critical here
+    
+        # compute validation loss, miou
+        val_losses = []
+        val_mious = []
+        for images, labels in val_dataset:
+            images = tf.cast(images, tf.float32) / 127.5 - 1.0
+            loss, miou = self._model.test_on_batch(images, labels)
+            val_losses.append(loss)
+            val_mious.append(miou)
+        val_epoch_loss = np.mean(val_losses)
+        val_epoch_miou = np.mean(val_mious)        
+        print('val_loss %.4f val_MIoU %.4f' % (val_epoch_loss, val_epoch_miou))
 
     def save_weights(self, filepath):
         """ Save intermediate weights, not full model. """
@@ -253,7 +297,7 @@ class SegModelBase(ABC):
             if crop_bbox:
                 img_raw = img_raw.crop(box=tuple(crop_bbox))
             if resize_shape:
-                img_raw = img_raw.resize(tuple(resize_shape))
+                img_raw = img_raw.resize(tuple(resize_shape), Image.BICUBIC)
             img_raw = np.array(img_raw)
 
             seg_pred = self.predict_instance(img_raw)
